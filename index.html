@@ -144,14 +144,22 @@
 
         #controls-help {
             font-size: 11px;
-            color: #666;
+            color: #888;
+            line-height: 1.8;
         }
 
         #controls-help kbd {
-            background: #333;
-            padding: 2px 6px;
-            border-radius: 3px;
+            display: inline-block;
+            background: rgba(100, 150, 255, 0.2);
+            border: 1px solid rgba(100, 150, 255, 0.3);
+            color: #aaccff;
+            padding: 2px 8px;
+            border-radius: 4px;
             font-family: monospace;
+            font-size: 10px;
+            min-width: 60px;
+            text-align: center;
+            margin-right: 8px;
         }
 
         .no-files {
@@ -299,7 +307,6 @@
 
                 try {
                     // Try to fetch the file list from a simple server endpoint
-                    // For static hosting, we'll use a fallback approach
                     const response = await fetch('vrml-files/');
 
                     if (response.ok) {
@@ -307,7 +314,11 @@
                         // Parse directory listing (works with simple file servers)
                         const matches = text.match(/href="([^"]+\.wrl)"/gi);
                         if (matches) {
-                            this.vrmlFiles = matches.map(m => m.match(/href="([^"]+)"/i)[1]);
+                            this.vrmlFiles = matches.map(m => {
+                                const match = m.match(/href="([^"]+)"/i)[1];
+                                // Extract just the filename from any path
+                                return match.split(/[\/\\]/).pop();
+                            });
                         }
                     }
                 } catch (e) {
@@ -315,8 +326,8 @@
                     console.log('Directory listing not available, trying known files...');
                 }
 
-                // Try to load known/common VRML files
-                const knownFiles = ['ch.wrl', 'Allworld.wrl', 'citypcxs.wrl'];
+                // Try to load known/common VRML files (skip original Inventor files)
+                const knownFiles = ['ch.wrl', 'test-simple.wrl'];
 
                 for (const file of knownFiles) {
                     if (!this.vrmlFiles.includes(file)) {
@@ -330,6 +341,9 @@
                         }
                     }
                 }
+
+                // Remove duplicates
+                this.vrmlFiles = [...new Set(this.vrmlFiles)];
 
                 this.renderFileList();
             }

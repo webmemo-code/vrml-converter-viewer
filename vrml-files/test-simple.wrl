@@ -1,0 +1,31 @@
+#VRML V2.0 utf8
+
+# Simple test file
+
+Shape {
+  appearance Appearance {
+    material Material {
+      diffuseColor 1 0 0
+    }
+  }
+  geometry Box { size 10 10 10 }
+}
+
+Shape {
+  appearance Appearance {
+    material Material {
+      diffuseColor 0 1 0
+    }
+  }
+  geometry IndexedLineSet {
+    coord Coordinate {
+      point [
+        0 0 0,
+        20 0 0,
+        20 20 0,
+        0 20 0
+      ]
+    }
+    coordIndex [0, 1, 2, 3, 0, -1]
+  }
+}
