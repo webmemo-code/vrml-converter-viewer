@@ -70,7 +70,7 @@ python -m SimpleHTTPServer 8080
 ### Navigation
 
 | Control | Action |
-|---------|--------|
+|:--------|:-------|
 | Left-click drag | Rotate view |
 | Right-click drag | Pan view |
 | Scroll wheel | Zoom in/out |
