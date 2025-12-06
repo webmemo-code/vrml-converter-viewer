@@ -1,0 +1,611 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>VRML Viewer</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            background: #1a1a2e;
+            color: #eee;
+            overflow: hidden;
+        }
+        #container { width: 100vw; height: 100vh; }
+
+        #ui {
+            position: fixed;
+            top: 20px;
+            left: 20px;
+            z-index: 100;
+            display: flex;
+            flex-direction: column;
+            gap: 10px;
+            max-height: calc(100vh - 40px);
+        }
+
+        .panel {
+            background: rgba(20, 20, 40, 0.9);
+            border: 1px solid rgba(100, 150, 255, 0.3);
+            border-radius: 8px;
+            padding: 15px;
+            backdrop-filter: blur(10px);
+        }
+
+        h3 {
+            font-size: 14px;
+            margin-bottom: 10px;
+            color: #88aaff;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+        }
+
+        #file-list {
+            max-height: 300px;
+            overflow-y: auto;
+        }
+
+        .file-btn {
+            display: block;
+            width: 100%;
+            padding: 10px 15px;
+            margin: 5px 0;
+            background: linear-gradient(135deg, #2a2a4a 0%, #1a1a3a 100%);
+            border: 1px solid rgba(100, 150, 255, 0.2);
+            border-radius: 6px;
+            color: #ddd;
+            cursor: pointer;
+            font-size: 13px;
+            text-align: left;
+            transition: all 0.2s;
+        }
+
+        .file-btn:hover {
+            background: linear-gradient(135deg, #3a3a6a 0%, #2a2a5a 100%);
+            border-color: rgba(100, 150, 255, 0.5);
+            transform: translateX(3px);
+        }
+
+        .file-btn.active {
+            background: linear-gradient(135deg, #4466aa 0%, #3355aa 100%);
+            border-color: #6688ff;
+        }
+
+        .file-btn .size {
+            font-size: 11px;
+            color: #888;
+            margin-top: 3px;
+        }
+
+        .export-btn {
+            display: inline-block;
+            padding: 8px 12px;
+            margin: 3px;
+            background: linear-gradient(135deg, #2a4a2a 0%, #1a3a1a 100%);
+            border: 1px solid rgba(100, 255, 150, 0.3);
+            border-radius: 6px;
+            color: #aaffaa;
+            cursor: pointer;
+            font-size: 12px;
+            transition: all 0.2s;
+        }
+
+        .export-btn:hover {
+            background: linear-gradient(135deg, #3a6a3a 0%, #2a5a2a 100%);
+            border-color: rgba(100, 255, 150, 0.5);
+        }
+
+        .export-btn:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+        }
+
+        #info {
+            position: fixed;
+            bottom: 20px;
+            left: 20px;
+            z-index: 100;
+        }
+
+        #stats {
+            font-size: 12px;
+            color: #888;
+            line-height: 1.6;
+        }
+
+        #loading {
+            position: fixed;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            background: rgba(20, 20, 40, 0.95);
+            padding: 30px 50px;
+            border-radius: 12px;
+            border: 1px solid rgba(100, 150, 255, 0.3);
+            text-align: center;
+            z-index: 200;
+            display: none;
+        }
+
+        .spinner {
+            width: 40px;
+            height: 40px;
+            border: 3px solid rgba(100, 150, 255, 0.2);
+            border-top-color: #6688ff;
+            border-radius: 50%;
+            animation: spin 1s linear infinite;
+            margin: 0 auto 15px;
+        }
+
+        @keyframes spin {
+            to { transform: rotate(360deg); }
+        }
+
+        #controls-help {
+            font-size: 11px;
+            color: #666;
+        }
+
+        #controls-help kbd {
+            background: #333;
+            padding: 2px 6px;
+            border-radius: 3px;
+            font-family: monospace;
+        }
+
+        .no-files {
+            color: #888;
+            font-style: italic;
+            padding: 10px;
+        }
+
+        #drop-zone {
+            border: 2px dashed rgba(100, 150, 255, 0.3);
+            border-radius: 6px;
+            padding: 15px;
+            text-align: center;
+            color: #666;
+            font-size: 12px;
+            margin-top: 10px;
+            transition: all 0.2s;
+        }
+
+        #drop-zone.dragover {
+            border-color: #6688ff;
+            background: rgba(100, 150, 255, 0.1);
+            color: #aaa;
+        }
+    </style>
+</head>
+<body>
+    <div id="container"></div>
+
+    <div id="ui">
+        <div class="panel">
+            <h3>VRML Files</h3>
+            <div id="file-list">
+                <div class="no-files">Loading files...</div>
+            </div>
+            <div id="drop-zone">
+                Drop .wrl files here<br>or click to browse
+                <input type="file" id="file-input" accept=".wrl,.vrml" multiple style="display: none;">
+            </div>
+        </div>
+
+        <div class="panel" id="export-panel" style="display: none;">
+            <h3>Export</h3>
+            <button class="export-btn" id="export-gltf">Export glTF</button>
+            <button class="export-btn" id="export-glb">Export GLB</button>
+            <button class="export-btn" id="export-obj">Export OBJ</button>
+        </div>
+
+        <div class="panel" id="controls-help">
+            <kbd>Left drag</kbd> Rotate<br>
+            <kbd>Right drag</kbd> Pan<br>
+            <kbd>Scroll</kbd> Zoom<br>
+            <kbd>R</kbd> Reset view
+        </div>
+    </div>
+
+    <div class="panel" id="info">
+        <div id="stats">Select a file to load...</div>
+    </div>
+
+    <div id="loading">
+        <div class="spinner"></div>
+        <div id="loading-text">Loading VRML...</div>
+    </div>
+
+    <script type="importmap">
+    {
+        "imports": {
+            "three": "https://unpkg.com/three@0.160.0/build/three.module.js",
+            "three/addons/": "https://unpkg.com/three@0.160.0/examples/jsm/"
+        }
+    }
+    </script>
+
+    <script type="module">
+        import * as THREE from 'three';
+        import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+        import { VRMLLoader } from 'three/addons/loaders/VRMLLoader.js';
+        import { GLTFExporter } from 'three/addons/exporters/GLTFExporter.js';
+        import { OBJExporter } from 'three/addons/exporters/OBJExporter.js';
+
+        class VRMLViewer {
+            constructor() {
+                this.scene = null;
+                this.camera = null;
+                this.renderer = null;
+                this.controls = null;
+                this.currentModel = null;
+                this.currentFile = null;
+                this.loader = new VRMLLoader();
+                this.vrmlFiles = [];
+
+                this.init();
+                this.loadFileList();
+                this.setupUI();
+                this.animate();
+            }
+
+            init() {
+                this.scene = new THREE.Scene();
+                this.scene.background = new THREE.Color(0x1a1a2e);
+
+                this.camera = new THREE.PerspectiveCamera(
+                    60,
+                    window.innerWidth / window.innerHeight,
+                    0.1,
+                    100000
+                );
+                this.camera.position.set(50, 50, 50);
+
+                this.renderer = new THREE.WebGLRenderer({ antialias: true });
+                this.renderer.setSize(window.innerWidth, window.innerHeight);
+                this.renderer.setPixelRatio(window.devicePixelRatio);
+                document.getElementById('container').appendChild(this.renderer.domElement);
+
+                this.controls = new OrbitControls(this.camera, this.renderer.domElement);
+                this.controls.enableDamping = true;
+                this.controls.dampingFactor = 0.05;
+
+                const ambientLight = new THREE.AmbientLight(0x404040, 2);
+                this.scene.add(ambientLight);
+
+                const directionalLight = new THREE.DirectionalLight(0xffffff, 1);
+                directionalLight.position.set(1, 1, 1);
+                this.scene.add(directionalLight);
+
+                const directionalLight2 = new THREE.DirectionalLight(0x8888ff, 0.5);
+                directionalLight2.position.set(-1, -0.5, -1);
+                this.scene.add(directionalLight2);
+
+                this.gridHelper = new THREE.GridHelper(1000, 50, 0x444466, 0x222244);
+                this.scene.add(this.gridHelper);
+
+                window.addEventListener('resize', () => this.onResize());
+
+                window.addEventListener('keydown', (e) => {
+                    if (e.key === 'r' || e.key === 'R') {
+                        this.resetCamera();
+                    }
+                });
+            }
+
+            async loadFileList() {
+                const fileListEl = document.getElementById('file-list');
+
+                try {
+                    // Try to fetch the file list from a simple server endpoint
+                    // For static hosting, we'll use a fallback approach
+                    const response = await fetch('vrml-files/');
+
+                    if (response.ok) {
+                        const text = await response.text();
+                        // Parse directory listing (works with simple file servers)
+                        const matches = text.match(/href="([^"]+\.wrl)"/gi);
+                        if (matches) {
+                            this.vrmlFiles = matches.map(m => m.match(/href="([^"]+)"/i)[1]);
+                        }
+                    }
+                } catch (e) {
+                    // Fallback: try known files
+                    console.log('Directory listing not available, trying known files...');
+                }
+
+                // Try to load known/common VRML files
+                const knownFiles = ['ch.wrl', 'Allworld.wrl', 'citypcxs.wrl'];
+
+                for (const file of knownFiles) {
+                    if (!this.vrmlFiles.includes(file)) {
+                        try {
+                            const testResponse = await fetch(`vrml-files/${file}`, { method: 'HEAD' });
+                            if (testResponse.ok) {
+                                this.vrmlFiles.push(file);
+                            }
+                        } catch (e) {
+                            // File doesn't exist
+                        }
+                    }
+                }
+
+                this.renderFileList();
+            }
+
+            renderFileList() {
+                const fileListEl = document.getElementById('file-list');
+
+                if (this.vrmlFiles.length === 0) {
+                    fileListEl.innerHTML = '<div class="no-files">No VRML files found. Drop files to view.</div>';
+                    return;
+                }
+
+                fileListEl.innerHTML = this.vrmlFiles.map(file => `
+                    <button class="file-btn" data-file="${file}">
+                        ${file}
+                    </button>
+                `).join('');
+
+                fileListEl.querySelectorAll('.file-btn').forEach(btn => {
+                    btn.addEventListener('click', () => {
+                        const file = btn.dataset.file;
+                        this.loadFile(`vrml-files/${file}`, file);
+                    });
+                });
+            }
+
+            setupUI() {
+                // Drop zone functionality
+                const dropZone = document.getElementById('drop-zone');
+                const fileInput = document.getElementById('file-input');
+
+                dropZone.addEventListener('click', () => fileInput.click());
+
+                dropZone.addEventListener('dragover', (e) => {
+                    e.preventDefault();
+                    dropZone.classList.add('dragover');
+                });
+
+                dropZone.addEventListener('dragleave', () => {
+                    dropZone.classList.remove('dragover');
+                });
+
+                dropZone.addEventListener('drop', (e) => {
+                    e.preventDefault();
+                    dropZone.classList.remove('dragover');
+                    this.handleFiles(e.dataTransfer.files);
+                });
+
+                fileInput.addEventListener('change', (e) => {
+                    this.handleFiles(e.target.files);
+                });
+
+                // Export buttons
+                document.getElementById('export-gltf').addEventListener('click', () => this.exportGLTF(false));
+                document.getElementById('export-glb').addEventListener('click', () => this.exportGLTF(true));
+                document.getElementById('export-obj').addEventListener('click', () => this.exportOBJ());
+            }
+
+            handleFiles(files) {
+                for (const file of files) {
+                    if (file.name.endsWith('.wrl') || file.name.endsWith('.vrml')) {
+                        const reader = new FileReader();
+                        reader.onload = (e) => {
+                            this.loadVRMLFromText(e.target.result, file.name);
+                        };
+                        reader.readAsText(file);
+                    }
+                }
+            }
+
+            loadFile(path, displayName) {
+                document.getElementById('loading').style.display = 'block';
+                document.getElementById('loading-text').textContent = 'Loading VRML...';
+
+                document.querySelectorAll('.file-btn').forEach(btn => {
+                    btn.classList.toggle('active', btn.dataset.file === displayName);
+                });
+
+                fetch(path)
+                    .then(response => {
+                        if (!response.ok) throw new Error('File not found');
+                        return response.text();
+                    })
+                    .then(text => {
+                        this.loadVRMLFromText(text, displayName);
+                    })
+                    .catch(error => {
+                        console.error('Error loading file:', error);
+                        document.getElementById('stats').textContent = 'Error: ' + error.message;
+                        document.getElementById('loading').style.display = 'none';
+                    });
+            }
+
+            loadVRMLFromText(text, filename) {
+                document.getElementById('loading').style.display = 'block';
+                document.getElementById('loading-text').textContent = 'Parsing VRML...';
+
+                setTimeout(() => {
+                    try {
+                        if (this.currentModel) {
+                            this.scene.remove(this.currentModel);
+                            this.disposeObject(this.currentModel);
+                        }
+
+                        this.currentModel = this.loader.parse(text);
+                        this.scene.add(this.currentModel);
+
+                        this.fitCameraToObject(this.currentModel);
+                        this.updateStats(filename);
+
+                        this.currentFile = filename;
+
+                        // Show export panel
+                        document.getElementById('export-panel').style.display = 'block';
+                    } catch (error) {
+                        console.error('Error parsing VRML:', error);
+                        document.getElementById('stats').textContent = 'Error: ' + error.message;
+                    }
+
+                    document.getElementById('loading').style.display = 'none';
+                }, 50);
+            }
+
+            fitCameraToObject(object) {
+                const box = new THREE.Box3().setFromObject(object);
+                const size = box.getSize(new THREE.Vector3());
+                const center = box.getCenter(new THREE.Vector3());
+
+                const maxDim = Math.max(size.x, size.y, size.z);
+                const fov = this.camera.fov * (Math.PI / 180);
+                let cameraZ = Math.abs(maxDim / 2 / Math.tan(fov / 2));
+                cameraZ *= 1.5;
+
+                this.camera.position.set(
+                    center.x + cameraZ * 0.5,
+                    center.y + cameraZ * 0.5,
+                    center.z + cameraZ
+                );
+
+                this.camera.near = maxDim / 1000;
+                this.camera.far = maxDim * 100;
+                this.camera.updateProjectionMatrix();
+
+                this.controls.target.copy(center);
+                this.controls.update();
+
+                this.gridHelper.scale.setScalar(maxDim / 500);
+                this.gridHelper.position.y = box.min.y;
+            }
+
+            resetCamera() {
+                if (this.currentModel) {
+                    this.fitCameraToObject(this.currentModel);
+                }
+            }
+
+            updateStats(filename) {
+                let meshCount = 0;
+                let lineCount = 0;
+                let vertexCount = 0;
+
+                this.currentModel.traverse(obj => {
+                    if (obj instanceof THREE.Mesh) {
+                        meshCount++;
+                        if (obj.geometry.attributes.position) {
+                            vertexCount += obj.geometry.attributes.position.count;
+                        }
+                    } else if (obj instanceof THREE.Line) {
+                        lineCount++;
+                        if (obj.geometry.attributes.position) {
+                            vertexCount += obj.geometry.attributes.position.count;
+                        }
+                    }
+                });
+
+                document.getElementById('stats').innerHTML =
+                    '<strong>' + filename + '</strong><br>' +
+                    'Meshes: ' + meshCount.toLocaleString() + '<br>' +
+                    'Lines: ' + lineCount.toLocaleString() + '<br>' +
+                    'Vertices: ' + vertexCount.toLocaleString();
+            }
+
+            exportGLTF(binary) {
+                if (!this.currentModel) return;
+
+                const exporter = new GLTFExporter();
+                const options = {
+                    binary: binary,
+                    onlyVisible: true
+                };
+
+                document.getElementById('loading').style.display = 'block';
+                document.getElementById('loading-text').textContent = binary ? 'Exporting GLB...' : 'Exporting glTF...';
+
+                exporter.parse(
+                    this.currentModel,
+                    (result) => {
+                        document.getElementById('loading').style.display = 'none';
+
+                        const filename = this.currentFile.replace(/\.(wrl|vrml)$/i, '') + (binary ? '.glb' : '.gltf');
+
+                        if (binary) {
+                            this.downloadBlob(new Blob([result], { type: 'application/octet-stream' }), filename);
+                        } else {
+                            const json = JSON.stringify(result, null, 2);
+                            this.downloadBlob(new Blob([json], { type: 'application/json' }), filename);
+                        }
+                    },
+                    (error) => {
+                        console.error('Export error:', error);
+                        document.getElementById('loading').style.display = 'none';
+                        alert('Export failed: ' + error.message);
+                    },
+                    options
+                );
+            }
+
+            exportOBJ() {
+                if (!this.currentModel) return;
+
+                document.getElementById('loading').style.display = 'block';
+                document.getElementById('loading-text').textContent = 'Exporting OBJ...';
+
+                setTimeout(() => {
+                    try {
+                        const exporter = new OBJExporter();
+                        const result = exporter.parse(this.currentModel);
+
+                        const filename = this.currentFile.replace(/\.(wrl|vrml)$/i, '') + '.obj';
+                        this.downloadBlob(new Blob([result], { type: 'text/plain' }), filename);
+                    } catch (error) {
+                        console.error('Export error:', error);
+                        alert('Export failed: ' + error.message);
+                    }
+
+                    document.getElementById('loading').style.display = 'none';
+                }, 50);
+            }
+
+            downloadBlob(blob, filename) {
+                const link = document.createElement('a');
+                link.href = URL.createObjectURL(blob);
+                link.download = filename;
+                document.body.appendChild(link);
+                link.click();
+                document.body.removeChild(link);
+                URL.revokeObjectURL(link.href);
+            }
+
+            disposeObject(obj) {
+                obj.traverse(child => {
+                    if (child.geometry) child.geometry.dispose();
+                    if (child.material) {
+                        if (Array.isArray(child.material)) {
+                            child.material.forEach(m => m.dispose());
+                        } else {
+                            child.material.dispose();
+                        }
+                    }
+                });
+            }
+
+            onResize() {
+                this.camera.aspect = window.innerWidth / window.innerHeight;
+                this.camera.updateProjectionMatrix();
+                this.renderer.setSize(window.innerWidth, window.innerHeight);
+            }
+
+            animate() {
+                requestAnimationFrame(() => this.animate());
+                this.controls.update();
+                this.renderer.render(this.scene, this.camera);
+            }
+        }
+
+        new VRMLViewer();
+    </script>
+</body>
+</html>
