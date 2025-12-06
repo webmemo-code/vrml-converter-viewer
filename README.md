@@ -2,6 +2,12 @@
 
 A modern web-based VRML (Virtual Reality Modeling Language) viewer with interactive 3D visualization and export capabilities.
 
+![JavaScript](https://img.shields.io/badge/JavaScript-F7DF1E?style=flat-square&logo=javascript&logoColor=black)
+![Three.js](https://img.shields.io/badge/Three.js-000000?style=flat-square&logo=three.js)
+![WebGL](https://img.shields.io/badge/WebGL-990000?style=flat-square&logo=webgl)
+![HTML5](https://img.shields.io/badge/HTML5-E34F26?style=flat-square&logo=html5&logoColor=white)
+![CSS3](https://img.shields.io/badge/CSS3-1572B6?style=flat-square&logo=css3&logoColor=white)
+
 ## Features
 
 - **Dynamic File Loading**: Browse and load VRML files from the `/vrml-files` folder
