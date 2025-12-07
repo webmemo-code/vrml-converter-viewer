@@ -14,7 +14,8 @@ Shape {
 Shape {
   appearance Appearance {
     material Material {
-      diffuseColor 0 1 0
+      diffuseColor 1 1 1
+      emissiveColor 0.5 0.5 0.5
     }
   }
   geometry IndexedLineSet {
@@ -27,5 +28,30 @@ Shape {
       ]
     }
     coordIndex [0, 1, 2, 3, 0, -1]
+  }
+}
+
+# Text "3D" drawn with lines (Text node not supported by Three.js VRMLLoader)
+Shape {
+  appearance Appearance {
+    material Material {
+      emissiveColor 0 0.5 1
+    }
+  }
+  geometry IndexedLineSet {
+    coord Coordinate {
+      point [
+        # "3" character
+        2 18 0, 6 18 0, 6 15 0, 3 15 0,
+        6 15 0, 6 12 0, 2 12 0,
+        # "D" character
+        8 18 0, 8 12 0, 11 12 0, 12 13 0, 12 17 0, 11 18 0, 8 18 0
+      ]
+    }
+    coordIndex [
+      0, 1, 2, 3, -1,
+      4, 5, 6, -1,
+      7, 8, 9, 10, 11, 12, 13, -1
+    ]
   }
 }
