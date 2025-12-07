@@ -9,16 +9,11 @@ const path = require('path');
 
 function parseInventorFile(content) {
     const shapes = [];
-    let currentMaterial = null;
+    let currentMaterial = { diffuseColor: [0.8, 0.8, 0.8] };
 
     // Extract Material blocks
-    const materialRegex = /Material\s*\{([^}]+)\}/g;
-    const coordinate3Regex = /Coordinate3\s*\{\s*point\s*\[\s*([\s\S]*?)\s*\]\s*\}/g;
-    const indexedLineSetRegex = /IndexedLineSet\s*\{\s*coordIndex\s*\[\s*([\s\S]*?)\s*\]\s*\}/g;
-    const indexedFaceSetRegex = /IndexedFaceSet\s*\{\s*coordIndex\s*\[\s*([\s\S]*?)\s*\]\s*\}/g;
-
-    // Parse materials
     const materials = [];
+    const materialRegex = /Material\s*\{([^}]+)\}/g;
     let materialMatch;
     while ((materialMatch = materialRegex.exec(content)) !== null) {
         const matContent = materialMatch[1];
@@ -37,28 +32,25 @@ function parseInventorFile(content) {
         materials.push(material);
     }
 
-    currentMaterial = materials[0] || { diffuseColor: [0.8, 0.8, 0.8] };
+    if (materials.length > 0) {
+        currentMaterial = materials[0];
+    }
 
-    // Find all Coordinate3 blocks and their associated IndexedLineSet/IndexedFaceSet
-    const separatorRegex = /Separator\s*\{([\s\S]*?)(?=Separator\s*\{|\}[\s]*$)/g;
-
-    // Simple approach: find coordinate blocks and their following index sets
-    let coordMatch;
+    // Find Coordinate3 + IndexedLineSet/IndexedFaceSet combinations
     const coordRegex = /Coordinate3\s*\{\s*point\s*\[\s*([\s\S]*?)\s*\]\s*\}\s*(IndexedLineSet|IndexedFaceSet)\s*\{\s*coordIndex\s*\[\s*([\s\S]*?)\s*\]\s*\}/g;
+    let coordMatch;
 
     while ((coordMatch = coordRegex.exec(content)) !== null) {
         const pointsStr = coordMatch[1];
         const shapeType = coordMatch[2];
         const indicesStr = coordMatch[3];
 
-        // Parse points
         const points = [];
         const pointMatches = pointsStr.matchAll(/([-\d.]+)\s+([-\d.]+)\s+([-\d.]+)/g);
         for (const pm of pointMatches) {
             points.push([parseFloat(pm[1]), parseFloat(pm[2]), parseFloat(pm[3])]);
         }
 
-        // Parse indices
         const indices = [];
         const indexMatches = indicesStr.matchAll(/-?\d+/g);
         for (const im of indexMatches) {
@@ -73,6 +65,70 @@ function parseInventorFile(content) {
                 material: currentMaterial
             });
         }
+    }
+
+    // Find Cylinder primitives
+    const cylinderRegex = /Cylinder\s*\{([^}]*)\}/g;
+    let cylMatch;
+    while ((cylMatch = cylinderRegex.exec(content)) !== null) {
+        const cylContent = cylMatch[1];
+        const radiusMatch = cylContent.match(/radius\s+([\d.]+)/);
+        const heightMatch = cylContent.match(/height\s+([\d.]+)/);
+
+        shapes.push({
+            type: 'Cylinder',
+            radius: radiusMatch ? parseFloat(radiusMatch[1]) : 1,
+            height: heightMatch ? parseFloat(heightMatch[1]) : 2,
+            material: currentMaterial
+        });
+    }
+
+    // Find Sphere primitives
+    const sphereRegex = /Sphere\s*\{([^}]*)\}/g;
+    let sphereMatch;
+    while ((sphereMatch = sphereRegex.exec(content)) !== null) {
+        const sphereContent = sphereMatch[1];
+        const radiusMatch = sphereContent.match(/radius\s+([\d.]+)/);
+
+        shapes.push({
+            type: 'Sphere',
+            radius: radiusMatch ? parseFloat(radiusMatch[1]) : 1,
+            material: currentMaterial
+        });
+    }
+
+    // Find Cube primitives (Inventor) -> Box (VRML 2.0)
+    const cubeRegex = /Cube\s*\{([^}]*)\}/g;
+    let cubeMatch;
+    while ((cubeMatch = cubeRegex.exec(content)) !== null) {
+        const cubeContent = cubeMatch[1];
+        const widthMatch = cubeContent.match(/width\s+([\d.]+)/);
+        const heightMatch = cubeContent.match(/height\s+([\d.]+)/);
+        const depthMatch = cubeContent.match(/depth\s+([\d.]+)/);
+
+        shapes.push({
+            type: 'Box',
+            width: widthMatch ? parseFloat(widthMatch[1]) : 2,
+            height: heightMatch ? parseFloat(heightMatch[1]) : 2,
+            depth: depthMatch ? parseFloat(depthMatch[1]) : 2,
+            material: currentMaterial
+        });
+    }
+
+    // Find Cone primitives
+    const coneRegex = /Cone\s*\{([^}]*)\}/g;
+    let coneMatch;
+    while ((coneMatch = coneRegex.exec(content)) !== null) {
+        const coneContent = coneMatch[1];
+        const radiusMatch = coneContent.match(/bottomRadius\s+([\d.]+)/);
+        const heightMatch = coneContent.match(/height\s+([\d.]+)/);
+
+        shapes.push({
+            type: 'Cone',
+            bottomRadius: radiusMatch ? parseFloat(radiusMatch[1]) : 1,
+            height: heightMatch ? parseFloat(heightMatch[1]) : 2,
+            material: currentMaterial
+        });
     }
 
     return { shapes, materials };
@@ -112,39 +168,48 @@ function generateVRML2(parsed) {
         lines.push(`# Shape ${index + 1}: ${shape.type}`);
         lines.push('Shape {');
 
-        // Appearance - for lines, use emissiveColor so they're visible
+        // Appearance
         lines.push('  appearance Appearance {');
         lines.push('    material Material {');
         const color = shape.material.diffuseColor || [0.8, 0.8, 0.8];
-        lines.push(`      emissiveColor ${color.join(' ')}`);
-        lines.push('    }');
-        lines.push('  }');
-
-        // Geometry
-        lines.push('  geometry IndexedLineSet {');
-
-        // Coordinates
-        lines.push('    coord Coordinate {');
-        lines.push('      point [');
-        shape.points.forEach((p, i) => {
-            const comma = i < shape.points.length - 1 ? ',' : '';
-            lines.push(`        ${p[0]} ${p[1]} ${p[2]}${comma}`);
-        });
-        lines.push('      ]');
-        lines.push('    }');
-
-        // Coord indices
-        lines.push('    coordIndex [');
-        // Format indices in rows of 10
-        const indexRows = [];
-        for (let i = 0; i < shape.indices.length; i += 10) {
-            const row = shape.indices.slice(i, i + 10);
-            indexRows.push('      ' + row.join(', '));
+        if (shape.type === 'IndexedLineSet') {
+            lines.push(`      emissiveColor ${color.join(' ')}`);
+        } else {
+            lines.push(`      diffuseColor ${color.join(' ')}`);
         }
-        lines.push(indexRows.join(',\n'));
-        lines.push('    ]');
-
+        lines.push('    }');
         lines.push('  }');
+
+        // Geometry based on type
+        if (shape.type === 'IndexedLineSet' || shape.type === 'IndexedFaceSet') {
+            lines.push(`  geometry ${shape.type} {`);
+            lines.push('    coord Coordinate {');
+            lines.push('      point [');
+            shape.points.forEach((p, i) => {
+                const comma = i < shape.points.length - 1 ? ',' : '';
+                lines.push(`        ${p[0]} ${p[1]} ${p[2]}${comma}`);
+            });
+            lines.push('      ]');
+            lines.push('    }');
+            lines.push('    coordIndex [');
+            const indexRows = [];
+            for (let i = 0; i < shape.indices.length; i += 10) {
+                const row = shape.indices.slice(i, i + 10);
+                indexRows.push('      ' + row.join(', '));
+            }
+            lines.push(indexRows.join(',\n'));
+            lines.push('    ]');
+            lines.push('  }');
+        } else if (shape.type === 'Cylinder') {
+            lines.push(`  geometry Cylinder { radius ${shape.radius} height ${shape.height} }`);
+        } else if (shape.type === 'Sphere') {
+            lines.push(`  geometry Sphere { radius ${shape.radius} }`);
+        } else if (shape.type === 'Box') {
+            lines.push(`  geometry Box { size ${shape.width} ${shape.height} ${shape.depth} }`);
+        } else if (shape.type === 'Cone') {
+            lines.push(`  geometry Cone { bottomRadius ${shape.bottomRadius} height ${shape.height} }`);
+        }
+
         lines.push('}');
         lines.push('');
     });
