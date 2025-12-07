@@ -1,6 +1,6 @@
-# VRML Viewer
+# VRML Viewer & Converter
 
-A modern web-based VRML (Virtual Reality Modeling Language) vintage .wrl file viewer with interactive 3D visualization and export capabilities.
+This is a web-based VRML (Virtual Reality Modeling Language) vintage .wrl file viewer with interactive 3D visualization and export / convert capabilities.
 
 ![JavaScript](https://img.shields.io/badge/JavaScript-F7DF1E?style=flat-square&logo=javascript&logoColor=black)
 ![Three.js](https://img.shields.io/badge/Three.js-000000?style=flat-square&logo=three.js)
