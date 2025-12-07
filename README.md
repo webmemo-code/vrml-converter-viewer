@@ -128,8 +128,8 @@ The application is built as a single-file ES module application. To modify:
 
 ## License
 
-[Add your license here]
+MIT
 
 ## Contributing
 
-[Add contribution guidelines here]
+I don't intend to develop this prototype further.
