@@ -45,3 +45,8 @@ exported-models/
 *.glb
 *.gltf
 *.zip
+
+# VRML files - ignore all except test files
+vrml-files/*
+!vrml-files/test-simple.wrl
+!vrml-files/.gitkeep
