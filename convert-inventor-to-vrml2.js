@@ -91,110 +91,91 @@ function extractBraceBlock(content, openBraceIndex) {
 }
 
 function parseSeparatorContent(content, shapes) {
-    // Extract material from this separator
-    let material = { diffuseColor: [0.8, 0.8, 0.8] };
-    const materialMatch = content.match(/Material\s*\{([^}]+)\}/);
-    if (materialMatch) {
-        const matContent = materialMatch[1];
-        const diffuseMatch = matContent.match(/diffuseColor\s+([\d.]+)\s+([\d.]+)\s+([\d.]+)/);
-        if (diffuseMatch) {
-            material.diffuseColor = [parseFloat(diffuseMatch[1]), parseFloat(diffuseMatch[2]), parseFloat(diffuseMatch[3])];
+    // VRML 1.0 uses sequential state: each Coordinate3 sets current coords,
+    // each Material sets current material, geometry nodes use current state.
+    // We scan for all nodes in order and track state.
+
+    const nodeRegex = /\b(Material|Coordinate3|IndexedLineSet|IndexedFaceSet|Sphere|Cylinder|Cube|Cone)\s*\{/g;
+    let currentMaterial = { diffuseColor: [0.8, 0.8, 0.8] };
+    let currentPoints = [];
+    let nodeMatch;
+
+    while ((nodeMatch = nodeRegex.exec(content)) !== null) {
+        const nodeType = nodeMatch[1];
+        const braceStart = nodeMatch.index + nodeMatch[0].length - 1;
+        const block = extractBraceBlock(content, braceStart);
+        if (block === null) continue;
+
+        // Advance regex past this block to avoid matching inside it
+        nodeRegex.lastIndex = braceStart + block.length + 2;
+
+        if (nodeType === 'Material') {
+            const diffuseMatch = block.match(/diffuseColor\s+([\d.]+)\s+([\d.]+)\s+([\d.]+)/);
+            if (diffuseMatch) {
+                currentMaterial = { diffuseColor: [parseFloat(diffuseMatch[1]), parseFloat(diffuseMatch[2]), parseFloat(diffuseMatch[3])] };
+            }
+            const emissiveMatch = block.match(/emissiveColor\s+([\d.]+)\s+([\d.]+)\s+([\d.]+)/);
+            if (emissiveMatch) {
+                currentMaterial.emissiveColor = [parseFloat(emissiveMatch[1]), parseFloat(emissiveMatch[2]), parseFloat(emissiveMatch[3])];
+            }
+        } else if (nodeType === 'Coordinate3') {
+            const pointsStr = block.match(/point\s*\[\s*([\s\S]*?)\s*\]/);
+            if (pointsStr) {
+                currentPoints = [];
+                const pointMatches = pointsStr[1].matchAll(/([-\d.eE+]+)\s+([-\d.eE+]+)\s+([-\d.eE+]+)/g);
+                for (const pm of pointMatches) {
+                    currentPoints.push([parseFloat(pm[1]), parseFloat(pm[2]), parseFloat(pm[3])]);
+                }
+            }
+        } else if (nodeType === 'IndexedLineSet' || nodeType === 'IndexedFaceSet') {
+            const indexStr = block.match(/coordIndex\s*\[\s*([\s\S]*?)\s*\]/);
+            if (indexStr && currentPoints.length > 0) {
+                const indices = [];
+                const indexMatches = indexStr[1].matchAll(/-?\d+/g);
+                for (const im of indexMatches) {
+                    indices.push(parseInt(im[0]));
+                }
+                if (indices.length > 0) {
+                    shapes.push({ type: nodeType, points: currentPoints, indices, material: currentMaterial });
+                }
+            }
+        } else if (nodeType === 'Sphere') {
+            const radiusMatch = block.match(/radius\s+([\d.eE+]+)/);
+            shapes.push({
+                type: 'Sphere',
+                radius: radiusMatch ? parseFloat(radiusMatch[1]) : 1,
+                material: currentMaterial
+            });
+        } else if (nodeType === 'Cylinder') {
+            const radiusMatch = block.match(/radius\s+([\d.eE+]+)/);
+            const heightMatch = block.match(/height\s+([\d.eE+]+)/);
+            shapes.push({
+                type: 'Cylinder',
+                radius: radiusMatch ? parseFloat(radiusMatch[1]) : 1,
+                height: heightMatch ? parseFloat(heightMatch[1]) : 2,
+                material: currentMaterial
+            });
+        } else if (nodeType === 'Cube') {
+            const widthMatch = block.match(/width\s+([\d.eE+]+)/);
+            const heightMatch = block.match(/height\s+([\d.eE+]+)/);
+            const depthMatch = block.match(/depth\s+([\d.eE+]+)/);
+            shapes.push({
+                type: 'Box',
+                width: widthMatch ? parseFloat(widthMatch[1]) : 2,
+                height: heightMatch ? parseFloat(heightMatch[1]) : 2,
+                depth: depthMatch ? parseFloat(depthMatch[1]) : 2,
+                material: currentMaterial
+            });
+        } else if (nodeType === 'Cone') {
+            const radiusMatch = block.match(/bottomRadius\s+([\d.eE+]+)/);
+            const heightMatch = block.match(/height\s+([\d.eE+]+)/);
+            shapes.push({
+                type: 'Cone',
+                bottomRadius: radiusMatch ? parseFloat(radiusMatch[1]) : 1,
+                height: heightMatch ? parseFloat(heightMatch[1]) : 2,
+                material: currentMaterial
+            });
         }
-        const emissiveMatch = matContent.match(/emissiveColor\s+([\d.]+)\s+([\d.]+)\s+([\d.]+)/);
-        if (emissiveMatch) {
-            material.emissiveColor = [parseFloat(emissiveMatch[1]), parseFloat(emissiveMatch[2]), parseFloat(emissiveMatch[3])];
-        }
-    }
-
-    // Extract Coordinate3 points
-    let points = [];
-    const coordMatch = content.match(/Coordinate3\s*\{\s*point\s*\[\s*([\s\S]*?)\s*\]\s*\}/);
-    if (coordMatch) {
-        const pointsStr = coordMatch[1];
-        const pointMatches = pointsStr.matchAll(/([-\d.eE+]+)\s+([-\d.eE+]+)\s+([-\d.eE+]+)/g);
-        for (const pm of pointMatches) {
-            points.push([parseFloat(pm[1]), parseFloat(pm[2]), parseFloat(pm[3])]);
-        }
-    }
-
-    // Extract IndexedLineSet
-    const lineSetMatch = content.match(/IndexedLineSet\s*\{\s*coordIndex\s*\[\s*([\s\S]*?)\s*\]\s*\}/);
-    if (lineSetMatch && points.length > 0) {
-        const indices = [];
-        const indexMatches = lineSetMatch[1].matchAll(/-?\d+/g);
-        for (const im of indexMatches) {
-            indices.push(parseInt(im[0]));
-        }
-        if (indices.length > 0) {
-            shapes.push({ type: 'IndexedLineSet', points, indices, material });
-        }
-    }
-
-    // Extract IndexedFaceSet
-    const faceSetMatch = content.match(/IndexedFaceSet\s*\{\s*coordIndex\s*\[\s*([\s\S]*?)\s*\]\s*\}/);
-    if (faceSetMatch && points.length > 0) {
-        const indices = [];
-        const indexMatches = faceSetMatch[1].matchAll(/-?\d+/g);
-        for (const im of indexMatches) {
-            indices.push(parseInt(im[0]));
-        }
-        if (indices.length > 0) {
-            shapes.push({ type: 'IndexedFaceSet', points, indices, material });
-        }
-    }
-
-    // Skip PointSet — renders as camera-facing sprites in Three.js which looks wrong
-
-    // Extract Sphere
-    const sphereMatch = content.match(/Sphere\s*\{([^}]*)\}/);
-    if (sphereMatch) {
-        const radiusMatch = sphereMatch[1].match(/radius\s+([\d.eE+]+)/);
-        shapes.push({
-            type: 'Sphere',
-            radius: radiusMatch ? parseFloat(radiusMatch[1]) : 1,
-            material
-        });
-    }
-
-    // Extract Cylinder
-    const cylMatch = content.match(/Cylinder\s*\{([^}]*)\}/);
-    if (cylMatch) {
-        const radiusMatch = cylMatch[1].match(/radius\s+([\d.eE+]+)/);
-        const heightMatch = cylMatch[1].match(/height\s+([\d.eE+]+)/);
-        shapes.push({
-            type: 'Cylinder',
-            radius: radiusMatch ? parseFloat(radiusMatch[1]) : 1,
-            height: heightMatch ? parseFloat(heightMatch[1]) : 2,
-            material
-        });
-    }
-
-    // Extract Cube -> Box
-    const cubeMatch = content.match(/Cube\s*\{([^}]*)\}/);
-    if (cubeMatch) {
-        const widthMatch = cubeMatch[1].match(/width\s+([\d.eE+]+)/);
-        const heightMatch = cubeMatch[1].match(/height\s+([\d.eE+]+)/);
-        const depthMatch = cubeMatch[1].match(/depth\s+([\d.eE+]+)/);
-        shapes.push({
-            type: 'Box',
-            width: widthMatch ? parseFloat(widthMatch[1]) : 2,
-            height: heightMatch ? parseFloat(heightMatch[1]) : 2,
-            depth: depthMatch ? parseFloat(depthMatch[1]) : 2,
-            material
-        });
-    }
-
-    // Extract Cone
-    const coneMatch = content.match(/Cone\s*\{([^}]*)\}/);
-    if (coneMatch) {
-        const radiusMatch = coneMatch[1].match(/bottomRadius\s+([\d.eE+]+)/);
-        const heightMatch = coneMatch[1].match(/height\s+([\d.eE+]+)/);
-        shapes.push({
-            type: 'Cone',
-            bottomRadius: radiusMatch ? parseFloat(radiusMatch[1]) : 1,
-            height: heightMatch ? parseFloat(heightMatch[1]) : 2,
-            material
-        });
     }
 }
 

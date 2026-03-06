@@ -279,16 +279,14 @@
                 this.controls.enableDamping = true;
                 this.controls.dampingFactor = 0.05;
 
-                const ambientLight = new THREE.AmbientLight(0x404040, 2);
-                this.scene.add(ambientLight);
+                this.ambientLight = new THREE.AmbientLight(0x202040, 0.4);
+                this.scene.add(this.ambientLight);
 
-                const directionalLight = new THREE.DirectionalLight(0xffffff, 1);
-                directionalLight.position.set(1, 1, 1);
-                this.scene.add(directionalLight);
+                // Sun light — position updated dynamically based on time of day
+                this.sunLight = new THREE.DirectionalLight(0xffffff, 2.5);
+                this.scene.add(this.sunLight);
 
-                const directionalLight2 = new THREE.DirectionalLight(0x8888ff, 0.5);
-                directionalLight2.position.set(-1, -0.5, -1);
-                this.scene.add(directionalLight2);
+                this.updateSunPosition();
 
                 this.gridHelper = new THREE.GridHelper(1000, 50, 0x444466, 0x222244);
                 this.scene.add(this.gridHelper);
@@ -611,6 +609,62 @@
                 });
             }
 
+            updateSunPosition() {
+                const now = new Date();
+
+                // Calculate solar position on the globe
+                // UTC hours as decimal
+                const utcHours = now.getUTCHours() + now.getUTCMinutes() / 60 + now.getUTCSeconds() / 3600;
+
+                // Sun's hour angle: the sun is at longitude 0 at 12:00 UTC
+                // and moves west at 15°/hour. Globe's coordinate zero is offset ~90° from Greenwich.
+                const sunLongitude = -(utcHours - 12) * 15 + 90; // degrees, adjusted for globe orientation
+
+                // Earth's axial tilt: 23.44°
+                const axialTilt = 23.44 * Math.PI / 180;
+
+                // Day of year for solar declination
+                const startOfYear = new Date(now.getFullYear(), 0, 0);
+                const dayOfYear = Math.floor((now - startOfYear) / 86400000);
+
+                // Solar declination: sun's latitude, varies ±23.44° over the year
+                // Peak north at summer solstice (~day 172), peak south at winter solstice (~day 355)
+                const declination = axialTilt * Math.sin((2 * Math.PI / 365) * (dayOfYear - 81));
+
+                // Convert sun position to 3D coordinates on the globe
+                // The globe has Y-up, with the prime meridian on the +Z axis
+                const sunLonRad = sunLongitude * Math.PI / 180;
+                const sunLatRad = declination; // already in radians
+
+                const radius = 100;
+                // Globe convention: +Z = prime meridian, +X = west
+                this.sunLight.position.set(
+                    -Math.cos(sunLatRad) * Math.sin(sunLonRad) * radius,
+                    Math.sin(sunLatRad) * radius,
+                    Math.cos(sunLatRad) * Math.cos(sunLonRad) * radius
+                );
+
+                // Estimate sun elevation for Europe (~47°N, ~8°E) for color/intensity
+                const viewerLat = 47 * Math.PI / 180;
+                const viewerLon = 8 * Math.PI / 180;
+                const hourAngle = sunLonRad - viewerLon;
+                const sinElevation = Math.sin(viewerLat) * Math.sin(declination)
+                    + Math.cos(viewerLat) * Math.cos(declination) * Math.cos(hourAngle);
+                const elevation = Math.asin(Math.max(-1, Math.min(1, sinElevation)));
+                const elevationNorm = Math.max(0, elevation / (Math.PI / 2)); // 0..1
+
+                // Warm color at sunrise/sunset, white at noon
+                const r = 1;
+                const g = 0.65 + 0.35 * elevationNorm;
+                const b = 0.3 + 0.7 * elevationNorm;
+                this.sunLight.color.setRGB(r, g, b);
+
+                // Intensity based on sun elevation at viewer location
+                this.sunLight.intensity = elevation > 0
+                    ? 1.5 + 1.5 * elevationNorm
+                    : Math.max(0.2, 0.4 + sinElevation);
+            }
+
             onResize() {
                 this.camera.aspect = window.innerWidth / window.innerHeight;
                 this.camera.updateProjectionMatrix();
@@ -619,6 +673,7 @@
 
             animate() {
                 requestAnimationFrame(() => this.animate());
+                this.updateSunPosition();
                 this.controls.update();
                 this.renderer.render(this.scene, this.camera);
             }
