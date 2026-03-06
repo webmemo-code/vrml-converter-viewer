@@ -1,137 +1,201 @@
 #!/usr/bin/env node
 /**
- * Open Inventor to VRML 2.0 Converter
- * Converts SGI Open Inventor (.iv) files to VRML 2.0/97 format
+ * Open Inventor / VRML 1.0 to VRML 2.0 Converter
+ * Converts SGI Open Inventor (.iv) and VRML 1.0 files to VRML 2.0/97 format
  */
 
 const fs = require('fs');
 const path = require('path');
 
-function parseInventorFile(content) {
+function normalizeLineEndings(content) {
+    // Handle old Mac (\r), Windows (\r\n), and Unix (\n)
+    return content.replace(/\r\n/g, '\n').replace(/\r/g, '\n');
+}
+
+function parseSeparators(content) {
     const shapes = [];
-    let currentMaterial = { diffuseColor: [0.8, 0.8, 0.8] };
 
-    // Extract Material blocks
-    const materials = [];
-    const materialRegex = /Material\s*\{([^}]+)\}/g;
-    let materialMatch;
-    while ((materialMatch = materialRegex.exec(content)) !== null) {
+    // Find all Separator blocks, then only process those that don't
+    // contain nested Separators (leaf separators own their geometry directly)
+    const separators = findAllSeparators(content);
+
+    for (const sepContent of separators) {
+        // Check if this separator contains nested Separator blocks
+        // by removing them and seeing if geometry nodes remain at this level
+        const stripped = stripNestedSeparators(sepContent);
+
+        const hasGeometry = /\b(IndexedLineSet|IndexedFaceSet|PointSet|Sphere|Cylinder|Cube|Cone)\s*\{/.test(stripped);
+        if (!hasGeometry) continue;
+
+        // Parse only the content at this separator level (without nested separators)
+        parseSeparatorContent(stripped, shapes);
+    }
+
+    return { shapes };
+}
+
+function stripNestedSeparators(content) {
+    // Remove nested Separator { ... } blocks to get only this level's content
+    let result = content;
+    const regex = /(?:DEF\s+\w+\s+)?Separator\s*\{/g;
+    let match;
+
+    // Collect ranges to remove (nested separator blocks)
+    const ranges = [];
+    while ((match = regex.exec(content)) !== null) {
+        const startBrace = match.index + match[0].length - 1;
+        const block = extractBraceBlock(content, startBrace);
+        if (block !== null) {
+            // Remove from the start of the match to the closing brace
+            const endPos = startBrace + block.length + 2; // +2 for { and }
+            ranges.push([match.index, endPos]);
+        }
+    }
+
+    // Remove ranges in reverse order to preserve indices
+    for (let i = ranges.length - 1; i >= 0; i--) {
+        result = result.substring(0, ranges[i][0]) + result.substring(ranges[i][1]);
+    }
+
+    return result;
+}
+
+function findAllSeparators(content) {
+    const results = [];
+    const regex = /(?:DEF\s+\w+\s+)?Separator\s*\{/g;
+    let match;
+
+    while ((match = regex.exec(content)) !== null) {
+        const startBrace = match.index + match[0].length - 1;
+        const block = extractBraceBlock(content, startBrace);
+        if (block !== null) {
+            results.push(block);
+        }
+    }
+
+    return results;
+}
+
+function extractBraceBlock(content, openBraceIndex) {
+    let depth = 1;
+    let i = openBraceIndex + 1;
+    while (i < content.length && depth > 0) {
+        if (content[i] === '{') depth++;
+        else if (content[i] === '}') depth--;
+        i++;
+    }
+    if (depth === 0) {
+        return content.substring(openBraceIndex + 1, i - 1);
+    }
+    return null;
+}
+
+function parseSeparatorContent(content, shapes) {
+    // Extract material from this separator
+    let material = { diffuseColor: [0.8, 0.8, 0.8] };
+    const materialMatch = content.match(/Material\s*\{([^}]+)\}/);
+    if (materialMatch) {
         const matContent = materialMatch[1];
-        const material = {};
-
         const diffuseMatch = matContent.match(/diffuseColor\s+([\d.]+)\s+([\d.]+)\s+([\d.]+)/);
         if (diffuseMatch) {
             material.diffuseColor = [parseFloat(diffuseMatch[1]), parseFloat(diffuseMatch[2]), parseFloat(diffuseMatch[3])];
         }
-
         const emissiveMatch = matContent.match(/emissiveColor\s+([\d.]+)\s+([\d.]+)\s+([\d.]+)/);
         if (emissiveMatch) {
             material.emissiveColor = [parseFloat(emissiveMatch[1]), parseFloat(emissiveMatch[2]), parseFloat(emissiveMatch[3])];
         }
-
-        materials.push(material);
     }
 
-    if (materials.length > 0) {
-        currentMaterial = materials[0];
-    }
-
-    // Find Coordinate3 + IndexedLineSet/IndexedFaceSet combinations
-    const coordRegex = /Coordinate3\s*\{\s*point\s*\[\s*([\s\S]*?)\s*\]\s*\}\s*(IndexedLineSet|IndexedFaceSet)\s*\{\s*coordIndex\s*\[\s*([\s\S]*?)\s*\]\s*\}/g;
-    let coordMatch;
-
-    while ((coordMatch = coordRegex.exec(content)) !== null) {
+    // Extract Coordinate3 points
+    let points = [];
+    const coordMatch = content.match(/Coordinate3\s*\{\s*point\s*\[\s*([\s\S]*?)\s*\]\s*\}/);
+    if (coordMatch) {
         const pointsStr = coordMatch[1];
-        const shapeType = coordMatch[2];
-        const indicesStr = coordMatch[3];
-
-        const points = [];
-        const pointMatches = pointsStr.matchAll(/([-\d.]+)\s+([-\d.]+)\s+([-\d.]+)/g);
+        const pointMatches = pointsStr.matchAll(/([-\d.eE+]+)\s+([-\d.eE+]+)\s+([-\d.eE+]+)/g);
         for (const pm of pointMatches) {
             points.push([parseFloat(pm[1]), parseFloat(pm[2]), parseFloat(pm[3])]);
         }
+    }
 
+    // Extract IndexedLineSet
+    const lineSetMatch = content.match(/IndexedLineSet\s*\{\s*coordIndex\s*\[\s*([\s\S]*?)\s*\]\s*\}/);
+    if (lineSetMatch && points.length > 0) {
         const indices = [];
-        const indexMatches = indicesStr.matchAll(/-?\d+/g);
+        const indexMatches = lineSetMatch[1].matchAll(/-?\d+/g);
         for (const im of indexMatches) {
             indices.push(parseInt(im[0]));
         }
-
-        if (points.length > 0 && indices.length > 0) {
-            shapes.push({
-                type: shapeType,
-                points: points,
-                indices: indices,
-                material: currentMaterial
-            });
+        if (indices.length > 0) {
+            shapes.push({ type: 'IndexedLineSet', points, indices, material });
         }
     }
 
-    // Find Cylinder primitives
-    const cylinderRegex = /Cylinder\s*\{([^}]*)\}/g;
-    let cylMatch;
-    while ((cylMatch = cylinderRegex.exec(content)) !== null) {
-        const cylContent = cylMatch[1];
-        const radiusMatch = cylContent.match(/radius\s+([\d.]+)/);
-        const heightMatch = cylContent.match(/height\s+([\d.]+)/);
+    // Extract IndexedFaceSet
+    const faceSetMatch = content.match(/IndexedFaceSet\s*\{\s*coordIndex\s*\[\s*([\s\S]*?)\s*\]\s*\}/);
+    if (faceSetMatch && points.length > 0) {
+        const indices = [];
+        const indexMatches = faceSetMatch[1].matchAll(/-?\d+/g);
+        for (const im of indexMatches) {
+            indices.push(parseInt(im[0]));
+        }
+        if (indices.length > 0) {
+            shapes.push({ type: 'IndexedFaceSet', points, indices, material });
+        }
+    }
 
+    // Skip PointSet — renders as camera-facing sprites in Three.js which looks wrong
+
+    // Extract Sphere
+    const sphereMatch = content.match(/Sphere\s*\{([^}]*)\}/);
+    if (sphereMatch) {
+        const radiusMatch = sphereMatch[1].match(/radius\s+([\d.eE+]+)/);
+        shapes.push({
+            type: 'Sphere',
+            radius: radiusMatch ? parseFloat(radiusMatch[1]) : 1,
+            material
+        });
+    }
+
+    // Extract Cylinder
+    const cylMatch = content.match(/Cylinder\s*\{([^}]*)\}/);
+    if (cylMatch) {
+        const radiusMatch = cylMatch[1].match(/radius\s+([\d.eE+]+)/);
+        const heightMatch = cylMatch[1].match(/height\s+([\d.eE+]+)/);
         shapes.push({
             type: 'Cylinder',
             radius: radiusMatch ? parseFloat(radiusMatch[1]) : 1,
             height: heightMatch ? parseFloat(heightMatch[1]) : 2,
-            material: currentMaterial
+            material
         });
     }
 
-    // Find Sphere primitives
-    const sphereRegex = /Sphere\s*\{([^}]*)\}/g;
-    let sphereMatch;
-    while ((sphereMatch = sphereRegex.exec(content)) !== null) {
-        const sphereContent = sphereMatch[1];
-        const radiusMatch = sphereContent.match(/radius\s+([\d.]+)/);
-
-        shapes.push({
-            type: 'Sphere',
-            radius: radiusMatch ? parseFloat(radiusMatch[1]) : 1,
-            material: currentMaterial
-        });
-    }
-
-    // Find Cube primitives (Inventor) -> Box (VRML 2.0)
-    const cubeRegex = /Cube\s*\{([^}]*)\}/g;
-    let cubeMatch;
-    while ((cubeMatch = cubeRegex.exec(content)) !== null) {
-        const cubeContent = cubeMatch[1];
-        const widthMatch = cubeContent.match(/width\s+([\d.]+)/);
-        const heightMatch = cubeContent.match(/height\s+([\d.]+)/);
-        const depthMatch = cubeContent.match(/depth\s+([\d.]+)/);
-
+    // Extract Cube -> Box
+    const cubeMatch = content.match(/Cube\s*\{([^}]*)\}/);
+    if (cubeMatch) {
+        const widthMatch = cubeMatch[1].match(/width\s+([\d.eE+]+)/);
+        const heightMatch = cubeMatch[1].match(/height\s+([\d.eE+]+)/);
+        const depthMatch = cubeMatch[1].match(/depth\s+([\d.eE+]+)/);
         shapes.push({
             type: 'Box',
             width: widthMatch ? parseFloat(widthMatch[1]) : 2,
             height: heightMatch ? parseFloat(heightMatch[1]) : 2,
             depth: depthMatch ? parseFloat(depthMatch[1]) : 2,
-            material: currentMaterial
+            material
         });
     }
 
-    // Find Cone primitives
-    const coneRegex = /Cone\s*\{([^}]*)\}/g;
-    let coneMatch;
-    while ((coneMatch = coneRegex.exec(content)) !== null) {
-        const coneContent = coneMatch[1];
-        const radiusMatch = coneContent.match(/bottomRadius\s+([\d.]+)/);
-        const heightMatch = coneContent.match(/height\s+([\d.]+)/);
-
+    // Extract Cone
+    const coneMatch = content.match(/Cone\s*\{([^}]*)\}/);
+    if (coneMatch) {
+        const radiusMatch = coneMatch[1].match(/bottomRadius\s+([\d.eE+]+)/);
+        const heightMatch = coneMatch[1].match(/height\s+([\d.eE+]+)/);
         shapes.push({
             type: 'Cone',
             bottomRadius: radiusMatch ? parseFloat(radiusMatch[1]) : 1,
             height: heightMatch ? parseFloat(heightMatch[1]) : 2,
-            material: currentMaterial
+            material
         });
     }
-
-    return { shapes, materials };
 }
 
 function generateVRML2(parsed) {
@@ -139,28 +203,14 @@ function generateVRML2(parsed) {
 
     lines.push('#VRML V2.0 utf8');
     lines.push('');
-    lines.push('# Converted from Open Inventor format');
+    lines.push('# Converted from Open Inventor / VRML 1.0 format');
     lines.push('# Generated by convert-inventor-to-vrml2.js');
     lines.push('');
 
-    // Add navigation info
-    lines.push('NavigationInfo {');
-    lines.push('  type ["EXAMINE", "ANY"]');
-    lines.push('  headlight TRUE');
-    lines.push('}');
-    lines.push('');
-
-    // Add a default viewpoint
-    lines.push('Viewpoint {');
-    lines.push('  position 0 0 500');
-    lines.push('  description "Default View"');
-    lines.push('}');
-    lines.push('');
-
-    // Add background
-    lines.push('Background {');
-    lines.push('  skyColor [0.1 0.1 0.2]');
-    lines.push('}');
+    // Wrap all shapes in a Transform to orient Y-up (poles on Y axis)
+    lines.push('Transform {');
+    lines.push('  rotation 1 0 0 -1.5708');
+    lines.push('  children [');
     lines.push('');
 
     // Convert each shape
@@ -176,6 +226,9 @@ function generateVRML2(parsed) {
             lines.push(`      emissiveColor ${color.join(' ')}`);
         } else {
             lines.push(`      diffuseColor ${color.join(' ')}`);
+            if (shape.type === 'Sphere') {
+                lines.push('      transparency 0.5');
+            }
         }
         lines.push('    }');
         lines.push('  }');
@@ -214,6 +267,10 @@ function generateVRML2(parsed) {
         lines.push('');
     });
 
+    // Close Transform
+    lines.push('  ] # end children');
+    lines.push('} # end Transform');
+
     return lines.join('\n');
 }
 
@@ -224,7 +281,8 @@ const outputFile = process.argv[3] || inputFile.replace('.wrl', '-v2.wrl');
 console.log(`Converting: ${inputFile} -> ${outputFile}`);
 
 try {
-    const content = fs.readFileSync(inputFile, 'utf8');
+    let content = fs.readFileSync(inputFile, 'utf8');
+    content = normalizeLineEndings(content);
 
     // Check if already VRML 2.0
     if (content.startsWith('#VRML V2.0')) {
@@ -232,12 +290,12 @@ try {
         process.exit(0);
     }
 
-    // Check if Open Inventor format
-    if (!content.startsWith('#Inventor')) {
-        console.log('Warning: File does not appear to be Open Inventor format.');
+    // Check if Open Inventor or VRML 1.0 format
+    if (!content.startsWith('#Inventor') && !content.startsWith('#VRML V1.0')) {
+        console.log('Warning: File does not appear to be Open Inventor or VRML 1.0 format.');
     }
 
-    const parsed = parseInventorFile(content);
+    const parsed = parseSeparators(content);
     console.log(`Found ${parsed.shapes.length} shapes`);
 
     if (parsed.shapes.length === 0) {

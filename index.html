@@ -449,6 +449,10 @@
                         }
 
                         this.currentModel = this.loader.parse(text);
+
+                        // Reset scene background in case VRML file set one
+                        this.scene.background = new THREE.Color(0x1a1a2e);
+
                         this.scene.add(this.currentModel);
 
                         this.fitCameraToObject(this.currentModel);
@@ -471,6 +475,7 @@
                 const box = new THREE.Box3().setFromObject(object);
                 const size = box.getSize(new THREE.Vector3());
                 const center = box.getCenter(new THREE.Vector3());
+                console.log('Bounding box:', { min: box.min, max: box.max, size, center });
 
                 const maxDim = Math.max(size.x, size.y, size.z);
                 const fov = this.camera.fov * (Math.PI / 180);
