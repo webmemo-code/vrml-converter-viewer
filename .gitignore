@@ -43,11 +43,13 @@ logs/
 
 # Downloaded/generated files
 exported-models/
-*.glb
+#*.glb
 *.gltf
 *.zip
 
 # VRML files - ignore all except test files
 vrml-files/*
 !vrml-files/test-simple.wrl
+!blue-3d-globe.wrl
+
 !vrml-files/.gitkeep

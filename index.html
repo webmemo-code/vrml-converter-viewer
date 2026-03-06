@@ -451,6 +451,11 @@
                         // Reset scene background in case VRML file set one
                         this.scene.background = new THREE.Color(0x1a1a2e);
 
+                        // Apply earth texture to globe sphere
+                        if (filename.includes('globe')) {
+                            this.applyGlobeTexture(this.currentModel);
+                        }
+
                         this.scene.add(this.currentModel);
 
                         this.fitCameraToObject(this.currentModel);
@@ -594,6 +599,30 @@
                 link.click();
                 document.body.removeChild(link);
                 URL.revokeObjectURL(link.href);
+            }
+
+            applyGlobeTexture(model) {
+                const textureLoader = new THREE.TextureLoader();
+                textureLoader.load('vrml-files/earth.jpg', (texture) => {
+                    texture.colorSpace = THREE.SRGBColorSpace;
+                    model.traverse(child => {
+                        if (child.isMesh && !(child.material instanceof THREE.LineBasicMaterial)) {
+                            const oldGeo = child.geometry;
+                            // Match the original VRML sphere radius (0.999)
+                            const newGeo = new THREE.SphereGeometry(0.999, 64, 32);
+                            // The VRML model has Z-up before the Transform rotation,
+                            // so rotate the sphere to match: poles along Z axis
+                            newGeo.rotateX(Math.PI / 2);
+                            child.geometry = newGeo;
+                            oldGeo.dispose();
+                            child.material = new THREE.MeshStandardMaterial({
+                                map: texture,
+                                metalness: 0,
+                                roughness: 0.8
+                            });
+                        }
+                    });
+                });
             }
 
             disposeObject(obj) {
