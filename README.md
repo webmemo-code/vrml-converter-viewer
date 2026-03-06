@@ -45,14 +45,9 @@ cd vrml-viewer
 npx serve .
 ```
 
-**Using Python 3:**
+**Alternatively, using Python 3:**
 ```bash
 python -m http.server 8080
-```
-
-**Using Python 2:**
-```bash
-python -m SimpleHTTPServer 8080
 ```
 
 4. Open your browser and navigate to:
